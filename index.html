@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roboflow Object Detection</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom styles for the app */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .file-input-button {
+            cursor: pointer;
+        }
+        #image-container {
+            position: relative;
+        }
+        #preview-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none; /* Allows clicks to go through to the image if needed */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 min-h-screen flex items-center justify-center p-4">
+
+    <main class="w-full max-w-2xl bg-white rounded-2xl shadow-xl p-6 md:p-8">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">Image Object Detection</h1>
+            <p class="text-gray-500 mt-2">Upload an image to see the Roboflow model in action.</p>
+        </div>
+
+        <!-- Image Upload Section -->
+        <div class="mb-6">
+            <label for="image-upload" class="file-input-button w-full flex justify-center items-center px-4 py-6 bg-gray-50 text-blue-600 rounded-lg shadow-inner tracking-wide border border-dashed border-gray-300 cursor-pointer hover:bg-blue-50 hover:text-blue-700 transition-colors">
+                <svg class="w-8 h-8" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                    <path d="M16.88 9.1A4 4 0 0 1 16 17H5a5 5 0 0 1-1-9.9V7a3 3 0 0 1 4.52-2.59A4.98 4.98 0 0 1 17 8c0 .38-.04.74-.12 1.1zM11 11h3l-4 4-4-4h3v-4h2v4z" />
+                </svg>
+                <span class="ml-4 text-base leading-normal">Select an image</span>
+            </label>
+            <input type='file' id="image-upload" class="hidden" accept="image/jpeg, image/png, image/jpg" />
+        </div>
+        
+        <!-- Image Preview & Canvas -->
+        <div id="image-container" class="mb-6 rounded-lg overflow-hidden hidden">
+             <img id="image-preview" src="#" alt="Image preview" class="w-full h-auto rounded-lg"/>
+             <canvas id="preview-canvas"></canvas>
+        </div>
+
+        <!-- Action Button -->
+        <button id="detect-button" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 transition-all duration-300 ease-in-out transform hover:-translate-y-1 hidden">
+            <span id="button-text">Detect Objects</span>
+            <!-- Spinner for loading state -->
+            <div id="spinner" class="hidden animate-spin rounded-full h-5 w-5 border-b-2 border-white mx-auto"></div>
+        </button>
+        
+        <!-- Results Section -->
+        <div id="results-container" class="mt-8">
+            <!-- Detection results will be injected here -->
+        </div>
+         
+    </main>
+    
+    <script>
+        // --- CONFIGURATION ---
+        const ROBOFLOW_API_URL = "https://serverless.roboflow.com/my-first-project-h5e0e/1";
+        const ROBOFLOW_API_KEY = "Vh31wKrbvmqgjCZT5ApC";
+
+        // --- DOM ELEMENTS ---
+        const imageUpload = document.getElementById('image-upload');
+        const imageContainer = document.getElementById('image-container');
+        const imagePreview = document.getElementById('image-preview');
+        const detectButton = document.getElementById('detect-button');
+        const resultsContainer = document.getElementById('results-container');
+        const buttonText = document.getElementById('button-text');
+        const spinner = document.getElementById('spinner');
+        const canvas = document.getElementById('preview-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let uploadedImageBase64 = null;
+
+        // --- EVENT LISTENERS ---
+
+        // Listen for file selection
+        imageUpload.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                // Reset previous state
+                resultsContainer.innerHTML = '';
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Read the file as a Data URL (base64)
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    const imageUrl = event.target.result;
+                    imagePreview.src = imageUrl;
+                    uploadedImageBase64 = imageUrl;
+                    
+                    // Show the preview and detect button
+                    imageContainer.classList.remove('hidden');
+                    detectButton.classList.remove('hidden');
+
+                    // Ensure canvas is resized after image loads
+                    imagePreview.onload = () => {
+                        resizeCanvas();
+                    }
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Listen for detect button click
+        detectButton.addEventListener('click', function() {
+            if (!uploadedImageBase64) {
+                alert("Please upload an image first.");
+                return;
+            }
+
+            // Prepare for API call
+            setLoadingState(true);
+            resultsContainer.innerHTML = '';
+            
+            // Clean the base64 string (remove prefix)
+            const base64Data = uploadedImageBase64.replace(/^data:image\/(jpeg|png|jpg);base64,/, "");
+
+            // Make the API request
+            fetch(`${ROBOFLOW_API_URL}?api_key=${ROBOFLOW_API_KEY}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: base64Data
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log(data); // Log the response for debugging
+                displayResults(data);
+                setLoadingState(false);
+            })
+            .catch(error => {
+                console.error("Error:", error);
+                resultsContainer.innerHTML = `<p class="text-red-500 text-center">An error occurred: ${error.message}</p>`;
+                setLoadingState(false);
+            });
+        });
+        
+        // Adjust canvas on window resize for responsiveness
+        window.addEventListener('resize', resizeCanvas);
+
+        // --- FUNCTIONS ---
+        
+        /**
+         * Toggles the loading state of the detect button.
+         * @param {boolean} isLoading - True to show spinner, false to show text.
+         */
+        function setLoadingState(isLoading) {
+            if (isLoading) {
+                buttonText.classList.add('hidden');
+                spinner.classList.remove('hidden');
+                detectButton.disabled = true;
+            } else {
+                buttonText.classList.remove('hidden');
+                spinner.classList.add('hidden');
+                detectButton.disabled = false;
+            }
+        }
+        
+        /**
+         * Renders the detection results and draws bounding boxes.
+         * @param {object} data - The API response from Roboflow.
+         */
+        function displayResults(data) {
+            if (!data.predictions || data.predictions.length === 0) {
+                resultsContainer.innerHTML = '<p class="text-center text-gray-500">No objects were detected in the image.</p>';
+                return;
+            }
+
+            // Draw bounding boxes first
+            drawBoundingBoxes(data);
+
+            // Create a title for the results
+            const resultsTitle = document.createElement('h2');
+            resultsTitle.className = 'text-2xl font-bold mb-4 text-center';
+            resultsTitle.textContent = `Found ${data.predictions.length} Object(s)`;
+            resultsContainer.appendChild(resultsTitle);
+
+            // Display each prediction
+            data.predictions.forEach(p => {
+                const confidence = (p.confidence * 100).toFixed(1);
+                const resultCard = document.createElement('div');
+                resultCard.className = 'bg-gray-50 p-4 rounded-lg mb-3 shadow-sm border border-gray-200 flex justify-between items-center';
+                
+                resultCard.innerHTML = `
+                    <span class="font-semibold text-lg text-gray-800">${p.class}</span>
+                    <span class="text-sm font-medium bg-blue-100 text-blue-800 py-1 px-3 rounded-full">${confidence}% confidence</span>
+                `;
+                resultsContainer.appendChild(resultCard);
+            });
+        }
+        
+        /**
+         * Draws bounding boxes on the canvas overlay.
+         * @param {object} data - The API response containing predictions.
+         */
+        function drawBoundingBoxes(data) {
+            resizeCanvas(); // Ensure canvas is the correct size
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear previous drawings
+
+            // Scaling factors
+            const scaleX = canvas.width / data.image.width;
+            const scaleY = canvas.height / data.image.height;
+            
+            data.predictions.forEach(p => {
+                // Roboflow provides center coordinates (x, y)
+                const x = (p.x - p.width / 2) * scaleX;
+                const y = (p.y - p.height / 2) * scaleY;
+                const width = p.width * scaleX;
+                const height = p.height * scaleY;
+                
+                // --- Draw Bounding Box ---
+                ctx.strokeStyle = '#00FFFF'; // Bright cyan for visibility
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x, y, width, height);
+
+                // --- Draw Label with Background ---
+                const label = `${p.class} (${(p.confidence * 100).toFixed(1)}%)`;
+                ctx.font = '16px Inter';
+                const textWidth = ctx.measureText(label).width;
+                
+                ctx.fillStyle = '#00FFFF';
+                // Position label above the box, but inside if it would go off-screen
+                const textX = x;
+                const textY = y > 20 ? y - 5 : y + 18;
+                
+                ctx.fillRect(textX - 2, textY - 18, textWidth + 8, 24); // Background rectangle
+                
+                ctx.fillStyle = '#000000'; // Black text
+                ctx.fillText(label, textX + 2, textY);
+            });
+        }
+        
+        /**
+         * Resizes the canvas to match the displayed image dimensions.
+         */
+        function resizeCanvas() {
+            if (imagePreview.offsetParent !== null) { // Check if image is visible
+                canvas.width = imagePreview.clientWidth;
+                canvas.height = imagePreview.clientHeight;
+            }
+        }
+    </script>
+</body>
+</html>
